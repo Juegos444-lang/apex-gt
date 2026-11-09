@@ -2092,7 +2092,7 @@ const NET_ERRORS = {
   'browser-incompatible': () => 'Este navegador no permite juego en línea. Prueba con Chrome, Edge o Firefox.',
   'lost': () => 'Se perdió la conexión con el anfitrión.',
   'hostgone': () => 'El anfitrión cerró la sala.',
-  'server': () => 'Se cortó la conexión con el servidor de salas. Intenta de nuevo en un momento.',
+  'server': () => 'No pude conectar con el servidor de salas. Si usas Brave, desactiva los escudos (el león) para este sitio e intenta de nuevo.',
 };
 function netFail(e){
   const type = e && e.type || 'unknown', code = net.code;
@@ -2224,31 +2224,32 @@ const WS_ERRORS = { notfound:'peer-unavailable', full:'full', taken:'taken' };
 async function createRoomWS(retry){
   closeNet(); saveProfile();
   setStatus('Conectando con el servidor de salas…');
-  if (!(await wakeServer())) return setStatus('No pude conectar con el servidor de salas. Intenta de nuevo en un momento.', 'err');
+  await wakeServer();   // si el navegador bloquea esta consulta, igual se intenta conectar a la sala
   net.mode = 'host';
   net.code = Array.from({ length:4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
-  setStatus('Creando sala…');
+  setStatus('Creando sala… si el servidor estaba dormido puede tardar hasta un minuto.');
   const ws = wsOpen(net.code, 'host'); net.ws = ws;
   const pending = new Map();
+  const to = setTimeout(() => { if (net.ws === ws && net.myId === 'local') netFail({ type:'server' }); }, 65000);   // el plan gratis puede tardar ~1 min en despertar
   ws.onmessage = e => {
     if (net.ws !== ws) return;
     let m; try { m = JSON.parse(e.data); } catch(_){ return; }
-    if (m.t === 'ready'){ net.myId = m.id; net.lobby = [{ id:m.id, name:myName(), car:selected }]; setStatus(''); showLobby(); }
+    if (m.t === 'ready'){ clearTimeout(to); net.myId = m.id; net.lobby = [{ id:m.id, name:myName(), car:selected }]; setStatus(''); showLobby(); }
     else if (m.t === 'join') pending.set(m.id, wsConn(ws, m.id));
     else if (m.t === 'data'){ const c = net.conns.get(m.from) || pending.get(m.from) || wsConn(ws, m.from); hostData(c, m.d); }
     else if (m.t === 'leave'){ pending.delete(m.id); hostDrop(m.id); }
     else if (m.t === 'error'){ if (m.reason === 'taken' && (retry || 0) < 3) createRoomWS((retry || 0) + 1); else netFail({ type:WS_ERRORS[m.reason] || m.reason }); }
   };
-  ws.onclose = () => { if (net.ws === ws) netFail({ type:'server' }); };
+  ws.onclose = () => { clearTimeout(to); if (net.ws === ws) netFail({ type:'server' }); };
 }
 async function joinRoomWS(code){
   closeNet(); saveProfile();
   setStatus('Conectando con el servidor de salas…');
-  if (!(await wakeServer())) return setStatus('No pude conectar con el servidor de salas. Intenta de nuevo en un momento.', 'err');
+  await wakeServer();   // si el navegador bloquea esta consulta, igual se intenta conectar a la sala
   net.mode = 'guest'; net.code = code;
   setStatus('Conectando a la sala ' + code + '…');
   const ws = wsOpen(code, 'guest'); net.ws = ws;
-  const to = setTimeout(() => { if (net.ws === ws && !net.host) netFail({ type:'timeout' }); }, 12000);
+  const to = setTimeout(() => { if (net.ws === ws && !net.host) netFail({ type:'timeout' }); }, 65000);
   ws.onmessage = e => {
     if (net.ws !== ws) return;
     let m; try { m = JSON.parse(e.data); } catch(_){ return; }
