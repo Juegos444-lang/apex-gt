@@ -1675,6 +1675,12 @@ function placeBot(b){
 }
 
 // ---------- Física ----------
+// Corrección de rumbo hacia la dirección de la pista un poco más adelante (solo si el auto va hacia adelante)
+function roadAssist(sp, dt){
+  const ia = (player.idx + Math.round(sp * 0.3 / ds)) % N, d = wrapA(TH[ia] - player.h);
+  if (Math.cos(d) <= 0 || player.v <= 0) return 0;
+  return d * Math.min(1, 2.6 * clamp(sp / 25, 0, 1) * dt);
+}
 function updatePlayer(dt){
   const c = CARS[player.type], ctl = state === 'race';
   player.padCool -= dt; player.oilCool -= dt;
@@ -1683,7 +1689,7 @@ function updatePlayer(dt){
   if (player.air){   // en el aire: sin frenos y con poco control de dirección
     player.nitroOn = false; player.steerSm *= 1 - Math.min(1, dt * 3);
     const airSt = ctl ? (input.left || input.right ? input.left - input.right : (tiltOn() ? tilt.steer : 0)) : 0;
-    player.h += airSt * 0.45 * dt;
+    player.h += airSt * 0.45 * dt + roadAssist(Math.abs(player.v), dt) * 0.6;
     player.v -= player.v * 0.04 * dt;
     player.pos.x += Math.sin(player.h) * player.v * dt;
     player.pos.z += Math.cos(player.h) * player.v * dt;
@@ -1708,10 +1714,10 @@ function updatePlayer(dt){
   if (player.off) v -= v * 0.9 * dt;
   if (state === 'done') v -= v * 0.7 * dt;
   player.nitro = nitroOn ? Math.max(0, player.nitro - 32 * dt) : Math.min(100, player.nitro + (ctl ? 7 : 0) * dt);
-  if (player.slipT > 0){   // aceite: el auto patina y no responde al volante
-    player.slipT -= dt; st = 0;
-    player.h += player.slipDir * 2.6 * dt * (player.slipT / 1.1 + 0.25);
-    v -= v * 0.4 * dt;
+  if (player.slipT > 0){   // aceite: el auto coletea un poco y el volante responde a medias
+    player.slipT -= dt; st *= 0.5;
+    player.h += player.slipDir * 1.4 * dt * Math.max(0, player.slipT / 0.9);
+    v -= v * 0.3 * dt;
   }
   player.steerSm += (st - player.steerSm) * Math.min(1, dt * 9);
   // Giro: alcanza para tomar las curvas más cerradas a la velocidad tope de cada auto
@@ -1720,6 +1726,8 @@ function updatePlayer(dt){
   // Volante a fondo a alta velocidad: las llantas derrapan y el auto pierde velocidad
   const lock = Math.max(0, Math.abs(player.steerSm) - 0.5) * 2;
   if (lock > 0 && sp > 40) v -= v * 0.28 * lock * clamp((sp - 40) / 40, 0, 1) * dt;
+  // Estabilidad: el auto tiende a seguir la dirección de la pista, así no se va solo contra la pared
+  if (player.slipT <= 0 && state !== 'done') player.h += roadAssist(sp, dt);
   player.v = v;
   player.pos.x += Math.sin(player.h) * v * dt;
   player.pos.z += Math.cos(player.h) * v * dt;
@@ -1808,7 +1816,7 @@ function trackPlayer(dt){
   player.off = !player.air && Math.abs(lat) > HALF + CURB;
   if (!player.air && state !== 'menu'){
     if (player.padCool <= 0 && OB.pads.some(o => inRect(o, sAt, lat))){ player.boostT = 1.5; player.padCool = 0.6; player.v = Math.min(player.v + 9, CARS[player.type].vmax * 1.55); }
-    if (player.oilCool <= 0 && player.v > 10 && OB.oils.some(o => inRect(o, sAt, lat))){ player.slipT = 1.1; player.oilCool = 1.5; player.slipDir = player.steerSm ? -Math.sign(player.steerSm) : (Math.random() < 0.5 ? -1 : 1); }
+    if (player.oilCool <= 0 && player.v > 10 && OB.oils.some(o => inRect(o, sAt, lat))){ player.slipT = 0.9; player.oilCool = 1.5; player.slipDir = player.steerSm ? -Math.sign(player.steerSm) : (Math.random() < 0.5 ? -1 : 1); }
   }
   const lim = WALL - 1.1;
   if (Math.abs(lat) > lim){
