@@ -1047,15 +1047,33 @@ function buildObstacles(add){
   });
   padTex.wrapT = THREE.RepeatWrapping; OB.padTex = padTex;
   const padMat = new THREE.MeshBasicMaterial({ map:padTex, transparent:true, opacity:0.95, polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2 });
-  const oilTex = canvasTex(128, 128, (x, w, h) => {
+  // Mancha de aceite: negra y brillante, con reflejos de arcoíris y borde claro para que se vea desde lejos
+  const oilTex = canvasTex(256, 256, (x, w, h) => {
     x.clearRect(0, 0, w, h);
-    for (let k = 0; k < 7; k++){
-      const cx = 64 + (Math.random() - 0.5) * 50, cy = 64 + (Math.random() - 0.5) * 50, r = 22 + Math.random() * 24;
-      const g = x.createRadialGradient(cx, cy, 0, cx, cy, r); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.75, 'rgba(0,0,0,0.9)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-      x.fillStyle = g; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
+    const blobs = [];
+    for (let k = 0; k < 8; k++) blobs.push([128 + (Math.random() - 0.5) * 100, 128 + (Math.random() - 0.5) * 100, 40 + Math.random() * 44]);
+    const shape = () => { x.beginPath(); blobs.forEach(([cx, cy, r]) => { x.moveTo(cx + r, cy); x.arc(cx, cy, r, 0, Math.PI * 2); }); };
+    x.save(); shape(); x.lineWidth = 10; x.strokeStyle = 'rgba(226,232,240,0.85)'; x.stroke(); x.fillStyle = '#05060a'; x.fill(); x.clip();
+    x.globalCompositeOperation = 'lighter';
+    for (let k = 0; k < 26; k++){   // vetas de arcoíris como las del aceite sobre el asfalto
+      const cx = 128 + (Math.random() - 0.5) * 140, cy = 128 + (Math.random() - 0.5) * 140, r = 10 + Math.random() * 60;
+      x.strokeStyle = `hsla(${Math.random() * 360}, 95%, 55%, 0.55)`; x.lineWidth = 3 + Math.random() * 6;
+      x.beginPath(); x.arc(cx, cy, r, Math.random() * 6, Math.random() * 6 + 2.5); x.stroke();
     }
+    x.restore();
   });
-  const oilMat = new THREE.MeshStandardMaterial({ color:0x0b0b10, alphaMap:oilTex, transparent:true, roughness:0.05, metalness:0.7, envMapIntensity:2, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2 });
+  const oilMat = new THREE.MeshStandardMaterial({ map:oilTex, emissive:0xffffff, emissiveMap:oilTex, emissiveIntensity:0.9, transparent:true, roughness:0.35, metalness:0, envMapIntensity:0.25, depthWrite:false, polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2 });
+  // Señal de peligro amarilla antes de cada mancha
+  const signTex = canvasTex(128, 128, (x, w, h) => {
+    x.clearRect(0, 0, w, h);
+    const tri = (pad) => { x.beginPath(); x.moveTo(64, pad); x.lineTo(w - pad * 0.7, h - pad); x.lineTo(pad * 0.7, h - pad); x.closePath(); };
+    x.lineJoin = 'round'; tri(6); x.fillStyle = '#111'; x.fill(); x.lineWidth = 10; x.strokeStyle = '#111'; x.stroke();
+    tri(20); x.fillStyle = '#facc15'; x.fill();
+    x.fillStyle = '#111'; x.beginPath(); x.moveTo(64, 44); x.bezierCurveTo(82, 70, 82, 92, 64, 92); x.bezierCurveTo(46, 92, 46, 70, 64, 44); x.fill();   // gota de aceite
+  });
+  const signMat = new THREE.MeshBasicMaterial({ map:signTex, transparent:true, alphaTest:0.4, side:THREE.DoubleSide });
+  const postMat = new THREE.MeshStandardMaterial({ color:0x9ca3af, roughness:0.5, metalness:0.6 });
+  const signG = new THREE.PlaneGeometry(2.6, 2.6), postG = new THREE.CylinderGeometry(0.08, 0.08, 2.4, 8); postG.translate(0, 1.2, 0);
   // Rampa: flechas amarillas que suben, sobre fondo oscuro
   const rampTex = canvasTex(64, 64, (x, w, h) => {
     x.fillStyle = '#1f2430'; x.fillRect(0, 0, w, h);
@@ -1093,9 +1111,15 @@ function buildObstacles(add){
     onTrack(m, s, lat, 0.1); add(m); OB.pads.push(o);
   };
   const addOil = (s, lat) => {
-    const o = { s:s - 3.5, lat, w:6.5, len:7 };
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 7.5), oilMat); m.geometry.rotateX(-Math.PI / 2);
-    onTrack(m, s, lat, 0.1); m.rotation.y += rnd() * 6; add(m); OB.oils.push(o);
+    const o = { s:s - 5, lat, w:7, len:10 };   // alargada en el sentido de la pista para que se vea desde lejos
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(8.2, 11), oilMat); m.geometry.rotateX(-Math.PI / 2);
+    onTrack(m, s, lat, 0.1); m.rotation.y += (rnd() - 0.5) * 0.5 + (rnd() < 0.5 ? Math.PI : 0); add(m); OB.oils.push(o);
+    const side = lat >= 0 ? 1 : -1;
+    [70, 35].forEach(back => {
+      const g = new THREE.Group(), post = new THREE.Mesh(postG, postMat), sign = new THREE.Mesh(signG, signMat);
+      sign.position.y = 3.4; sign.rotation.y = Math.PI; post.castShadow = true; g.add(post, sign);
+      onTrack(g, s - back, side * (HALF + CURB + 2), 0); add(g);
+    });
   };
   const addRamp = (s, lat) => {
     const o = { s, lat, w:7, len:9, H:1.8 };
